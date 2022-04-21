@@ -1,0 +1,65 @@
+query HomePage {
+  homePage {
+    data {
+      attributes {
+        sections {
+          ... on ComponentCommonHeader {
+            id
+            Text
+            ButtonText
+            ButtonLink
+          }
+          ... on ComponentCommonCarousel {
+            id
+            Item {
+              ... on ComponentCommonTwoColumnBlock {
+                id
+                TitleText
+                Description
+                ButtonText
+                ButtonUrl
+                ImagePosition
+                Image {
+                  data {
+                    id
+                    attributes {
+                      url
+                      previewUrl
+                      alternativeText
+                      width
+                      height
+                    }
+                  }
+                }
+              }
+            }
+          }
+          ... on ComponentCommonTwoColumnBlock {
+            id
+            TitleText
+            Description
+            ButtonText
+            ButtonUrl
+            ImagePosition
+            Image {
+              data {
+                id
+                attributes {
+                  url
+                  previewUrl
+                  alternativeText
+                  width
+                  height
+                }
+              }
+            }
+          }
+          ... on Error {
+            code
+            message
+          }
+        }
+      }
+    }
+  }
+}
