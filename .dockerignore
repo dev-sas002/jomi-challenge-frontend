@@ -1,0 +1,32 @@
+# Build context hygiene: everything here is either rebuilt inside the image,
+# irrelevant to it, or something that must never end up in a layer.
+.git
+.gitignore
+node_modules
+.next
+out
+build
+coverage
+docs
+project_venv
+*.tsbuildinfo
+
+# Local secrets. `.env.example` is kept: it documents the variables.
+.env
+.env.*
+!.env.example
+
+# Tooling that does not run in the image.
+scripts
+__tests__
+**/__tests__
+test-utils
+jest.config.js
+jest.setup.ts
+**/*.test.ts
+**/*.test.tsx
+
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
