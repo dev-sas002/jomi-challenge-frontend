@@ -1,0 +1,40 @@
+# One command, no manual steps:
+#
+#   docker compose up --build
+#
+# Then open http://localhost:8261. The image is built against the bundled
+# fixture content (see lib/cms/fixtures.ts), so the page is fully populated
+# without a Strapi instance anywhere.
+#
+# To point it at a real CMS instead, set CMS_SOURCE=strapi and STRAPI_URL in a
+# .env file next to this one, and rebuild — the homepage is prerendered at
+# build time.
+
+services:
+  web:
+    build:
+      context: .
+      args:
+        CMS_SOURCE: ${CMS_SOURCE:-fixture}
+    image: jomi-challenge-frontend
+    ports:
+      # Host 8261 is deliberate: 3000 is left free for a locally running
+      # `yarn dev` and for the Strapi backend's own tooling.
+      - "8261:8261"
+    environment:
+      CMS_SOURCE: ${CMS_SOURCE:-fixture}
+      STRAPI_URL: ${STRAPI_URL:-}
+      STRAPI_CMS_URL: ${STRAPI_CMS_URL:-}
+      STRAPI_TOKEN: ${STRAPI_TOKEN:-}
+      CMS_REVALIDATE_SECONDS: ${CMS_REVALIDATE_SECONDS:-60}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8261').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
