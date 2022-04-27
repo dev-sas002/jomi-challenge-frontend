@@ -1,125 +1,63 @@
-# JOMI Code Challenge — Front-end
+# JOMI Code Challenge — front-end
 
-A Next.js front-end for the JOMI CMS coding challenge. It reads the `homePage`
-single type out of a [Strapi](https://strapi.io/) CMS over GraphQL and renders
-its `sections` **dynamic zone** — a heterogeneous, editor-ordered list of
-content blocks — by mapping each block's GraphQL `__typename` onto a React
-component through a registry.
+A Next.js 12 front-end that renders one Strapi page. The page is a **dynamic
+zone**: an editor-ordered list of heterogeneous content blocks, so the
+front-end cannot know its shape ahead of time and has to dispatch on each
+block's GraphQL `__typename`.
 
-The page is prerendered on the server and revalidated on a timer, so the HTML a
-visitor receives already contains the content: no client-side query, no loading
-spinner, and no CMS credentials in the browser bundle.
+Everything is prerendered. The HTML a visitor receives already contains the
+content — no client-side query, no loading spinner, no CMS address or token in
+the browser bundle.
 
-The accompanying backend and the original brief live in
+The CMS half of the exercise, and the brief itself, live in
 [`jomijournal/jomi-cms-challenge-backend`](https://github.com/jomijournal/jomi-cms-challenge-backend).
-This repository is the front-end half only; it does not contain the CMS.
+This repository is the front-end half only.
 
-## Screenshots
+> **What is this repository's own.** `jomijournal/jomi-challenge-frontend` is a
+> repository you fork, not an empty one: the Apollo plumbing, the codegen
+> config, `graphql/types.tsx`, the Jest wiring and stubbed block components with
+> `//TODO` markers all came with it. Sixteen of the fifty-seven tracked files
+> outside `public/` and `docs/` descend from that starter, and one of them —
+> `graphql/types.tsx`, 508 lines of codegen output from JOMI's schema — is
+> untouched. Nothing outside the brief was invented: widening an interview
+> exercise's scope only makes it harder to review.
 
-Captured with `yarn screenshots` (Playwright, Chromium, 1440x900 and 390x844)
-against the production build running on the bundled fixture content, so they
-are reproducible without a CMS.
+## What the brief asked for
 
-| The homepage (1440x900) |
-| --- |
-| ![Homepage hero](docs/screenshots/home-desktop.png) |
+> "Fill-in the needed fields in the query on `homepage.graphql`. Run `yarn gen`
+> … Complete components for `TwoColumnBlock`, `HeaderBlock`, `CarouselBlock` so
+> that the front-end can properly render them."
 
-| A two-column section | The carousel |
+| Asked for | Where it is |
 | --- | --- |
-| ![Two-column section](docs/screenshots/home-two-column.png) | ![Carousel section](docs/screenshots/home-carousel.png) |
+| The field selections in `homepage.graphql` | [`graphql/cms/homepage.graphql`](graphql/cms/homepage.graphql) — all three `__typename`s plus the `Error` member the dynamic zone can carry |
+| Regenerated types (`yarn gen`) | [`graphql/cms/homepage.generated.tsx`](graphql/cms/homepage.generated.tsx), committed so the app builds with no CMS present |
+| `HeaderBlock`, `TwoColumnBlock`, `CarouselBlock` | [`components/blocks/`](components/blocks) |
+| Selecting components by `__typename` | a registry rather than the suggested `switch` — see [Adding a block type](#adding-a-block-type) |
 
-| Mobile (390x844) |
-| --- |
-| ![Homepage on mobile](docs/screenshots/home-mobile.png) |
+The three `__typename`s and every field name are the contract between the two
+repositories. `ComponentCommonHeader`, `ComponentCommonTwoColumnBlock` and
+`ComponentCommonCarousel`, and the attributes under each, match the backend's
+`src/lib/blocks.js` exactly, and a test over there asserts them against the
+schema JSON. The deepest path in the query — `homePage → data → attributes →
+sections → Item → Image → data → attributes → url` — is nine levels, which is
+what the CMS's GraphQL depth limit of 12 is sized against.
 
-The artwork is generated, not stock photography — see `scripts/generate-seed-art.mjs`.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    subgraph cms["Content source"]
-        strapi["Strapi GraphQL API"]
-        fixture["lib/cms/fixtures.ts<br/>(bundled sample payload)"]
-    end
-
-    subgraph server["Server — build time and revalidation only"]
-        loader["lib/cms/homePage.ts<br/>picks the source, owns revalidate"]
-        client["lib/cms/strapi.ts<br/>Apollo client, server-only"]
-        mapper["lib/cms/mapHomePage.ts<br/>normalise + sanitise"]
-    end
-
-    subgraph view["Browser — static HTML, no data layer"]
-        page["pages/index.tsx"]
-        list["components/blocks/BlockList.tsx"]
-        registry["components/blocks/blockRegistry.ts"]
-        header["HeaderBlock"]
-        two["TwoColumnBlock"]
-        carousel["CarouselBlock"]
-        image["components/ui/CmsImage.tsx"]
-    end
-
-    strapi --> client --> mapper
-    fixture --> mapper
-    loader --> client
-    mapper -->|"HomeBlock[] view models"| page
-    page --> list --> registry
-    registry --> header
-    registry --> two
-    registry --> carousel
-    two --> image
-    carousel --> image
-```
-
-Dependencies point inward: the blocks know only about the view models in
-`lib/cms/blocks.ts`. Nothing under `components/` imports Apollo, the generated
-GraphQL types, or `process.env`.
-
-## How a page render works
-
-```mermaid
-sequenceDiagram
-    participant Build as next build / revalidation
-    participant Loader as loadHomePage()
-    participant Strapi
-    participant Mapper as mapHomePage()
-    participant Page as pages/index.tsx
-    participant Visitor
-
-    Build->>Loader: getStaticProps()
-    alt CMS_SOURCE=strapi (default)
-        Loader->>Strapi: HomePage query (server-side Apollo)
-        alt CMS reachable
-            Strapi-->>Loader: sections payload
-        else CMS down or erroring
-            Strapi--x Loader: network error
-            Note over Loader: logged, not thrown —<br/>the build must not fail
-        end
-    else CMS_SOURCE=fixture
-        Loader->>Loader: bundled fixture payload
-    end
-    Loader->>Mapper: raw payload
-    Note over Mapper: drop empty/unknown blocks,<br/>absolutise media URLs,<br/>reject unsafe hrefs
-    Mapper-->>Page: HomeBlock[]
-    Page-->>Build: props + revalidate: N
-
-    Visitor->>Page: GET /
-    Page-->>Visitor: prerendered HTML with content and critical CSS
-    Note over Page: after N seconds the next request<br/>triggers a background regeneration
-```
-
-## Quickstart
+## Run it
 
 ```bash
 docker compose up --build
-# then open http://localhost:8261
+# http://localhost:8261
 ```
 
 That is the whole thing. The image is built against the bundled fixture
-content, so the page is fully populated with no Strapi instance anywhere. To
-build it against a real CMS, put `CMS_SOURCE=strapi` and `STRAPI_URL` in a
-`.env` file next to `docker-compose.yml` and rebuild — the homepage is
-prerendered at build time, so the source is chosen then.
+content, so the page is fully populated with no Strapi instance anywhere. Port
+8261 rather than 3000, deliberately, so a locally running Next.js app is not
+displaced.
+
+To point it at a real CMS, put `CMS_SOURCE=strapi` and `STRAPI_URL` in a `.env`
+next to `docker-compose.yml` and rebuild — the homepage is prerendered at build
+time, so the source is chosen then.
 
 Without Docker:
 
@@ -129,188 +67,185 @@ cp .env.example .env     # defaults to CMS_SOURCE=fixture
 yarn dev                 # http://localhost:8261
 ```
 
-## Configuration
+## What it renders
 
-Every variable is read on the **server only**. `next.config.js` inlines nothing
-into the browser bundle, so the CMS address and token never reach a visitor.
+Captured by `yarn screenshots` — Playwright driving Chromium against the
+production build on fixture content, so they reproduce without a CMS. Desktop
+shots are 1440x900, mobile is 390x844.
 
-| Variable | Required | Default | What it does |
-| --- | --- | --- | --- |
-| `CMS_SOURCE` | no | `strapi` | `strapi` queries the live CMS; `fixture` renders the bundled sample payload in `lib/cms/fixtures.ts`, so the app builds and boots with no CMS running. Any other value is treated as `strapi`. |
-| `STRAPI_URL` | when `CMS_SOURCE=strapi` | `http://localhost:1337/graphql` | GraphQL endpoint of the Strapi CMS. Falls back to the default with a development warning when unset. |
-| `STRAPI_CMS_URL` | no | — | Origin of the Strapi instance. Its hostname is added to `images.domains` so `next/image` may load CMS media, and it is prefixed onto the root-relative URLs Strapi's local upload provider returns. |
-| `STRAPI_TOKEN` | no | — | Strapi API token, sent as `Authorization: Bearer …`. Unset means the public, unauthenticated endpoint. |
-| `CMS_REVALIDATE_SECONDS` | no | `60` | Seconds between ISR regenerations of the homepage. A non-positive or unparseable value warns and falls back to the default. |
-| `SCREENSHOT_PORT` | no | `8261` | Port `yarn screenshots` starts the production server on. |
+| The homepage: Header Block over the first Two-Column Block | The same page at 390x844 |
+| --- | --- |
+| ![The homepage at 1440x900](docs/screenshots/home-desktop.png) | ![The homepage on a phone](docs/screenshots/home-mobile.png) |
 
-`.env.example` documents the same set. It contains placeholders only — never
-commit a real token.
+| A Two-Column Block in full | The Carousel Block, on its first of three slides |
+| --- | --- |
+| ![A two-column section](docs/screenshots/home-two-column.png) | ![The carousel](docs/screenshots/home-carousel.png) |
 
-## Development
+The artwork is generated, not stock photography — `scripts/generate-seed-art.mjs`
+draws it from the theme palette, which keeps the repository free of licensing
+questions.
 
-```bash
-yarn install
-yarn dev                  # dev server on http://localhost:8261
-yarn build                # production build; prerenders "/"
-yarn start                # serve the production build on 8261
-yarn test                 # jest
-yarn test:coverage        # jest with coverage
-yarn lint                 # next lint (ESLint + jsx-a11y + @typescript-eslint)
-yarn typecheck            # tsc --noEmit, strict mode
-yarn screenshots          # rebuild docs/screenshots (needs `yarn build` first)
-yarn seed:art             # regenerate the seed artwork in public/seed
-yarn gen                  # regenerate GraphQL types from a live Strapi schema
+## From the dynamic zone to HTML
+
+```mermaid
+sequenceDiagram
+    participant Build as next build / revalidation
+    participant Loader as loadHomePage()
+    participant Strapi
+    participant Mapper as mapHomePage()
+    participant Page as pages/index.tsx
+    participant List as BlockList + registry
+    participant Visitor
+
+    Build->>Loader: getStaticProps()
+    alt CMS_SOURCE=strapi (the default)
+        Loader->>Strapi: HomePage query, server-side Apollo
+        alt CMS reachable
+            Strapi-->>Loader: sections payload
+        else CMS down or erroring
+            Strapi--x Loader: network error
+            Note over Loader: logged, never thrown —<br/>a CMS outage is not a build failure
+        end
+    else CMS_SOURCE=fixture
+        Loader->>Loader: bundled fixture payload
+    end
+    Loader->>Mapper: raw payload
+    Note over Mapper: drop empty and unknown blocks<br/>absolutise media URLs<br/>reject unsafe hrefs
+    Mapper-->>Page: HomeBlock[] view models
+    Page->>List: blocks, in editor order
+    List->>List: look each __typename up
+    Page-->>Build: props + revalidate: N
+
+    Visitor->>Page: GET /
+    Page-->>Visitor: prerendered HTML, content and critical CSS included
 ```
 
-`yarn gen` introspects the schema over the network at the URL in
-`graphql.config.yml`, so Strapi must be running. The generated files are
-committed so the app builds without the CMS present; `graphql/cms/homepage.generated.tsx`
-carries a header noting the two places it has been hand-edited and why.
+**The browser gets no data layer.** `lib/cms/strapi.ts` — the Apollo client and
+the GraphQL document — is reached through a dynamic `import()` taken only on the
+Strapi branch inside `getStaticProps`, so it never enters the client module
+graph. Nothing under `components/` imports Apollo, the generated types, or
+`process.env`: dependencies point inward, at the plain view models in
+`lib/cms/blocks.ts`.
 
-### Tests
+**`revalidate` is the entire caching strategy.** One query, no user input,
+nothing to paginate: the page is generated once and regenerated at most once per
+window whatever the traffic, and an editor's change appears without a redeploy.
+The window is `CMS_REVALIDATE_SECONDS`.
 
-Jest with the `jsdom` environment and Testing Library, wrapped in `next/jest`
-so the SWC transform and the `baseUrl`-style imports apply. Tests never reach
-the network: `jest.setup.ts` installs a `fetch` stub that rejects loudly, and
-also stubs `IntersectionObserver`, which jsdom lacks and `next/image` needs
-before it will swap in a real source.
+## Adding a block type
 
-```bash
-yarn test                      # whole suite
-yarn test --watch              # watch mode
-yarn test TwoColumnBlock       # one file by path fragment
-```
+A dynamic zone is an open set — an editor can add a component type at any time —
+which makes a `switch` on `__typename` the thing most likely to need editing
+next, in two or three places at once.
 
-Test files sit next to the code in `__tests__` directories, except page tests —
-Next.js treats every file under `pages/` as a route, so those live in
-`__tests__/pages/`.
+Instead each block exports `defineBlock({ typename, component })` beside its
+component, `components/blocks/blockRegistry.ts` collects those into a `Map`, and
+`BlockList` looks each block up. A new block type is one new file plus one line
+in that list. Two guards keep it honest:
 
-## Project structure
+- `ALL_BLOCK_TYPES_REGISTERED` is a compile-time completeness check. A member of
+  the `HomeBlock` union with no component stops `next build` with the missing
+  type named in the error.
+- An unrecognised `__typename` at runtime is skipped with a development warning
+  instead of throwing, because the CMS can always be ahead of a deploy and one
+  unknown block must not take the page down.
 
-```
-components/
-  blocks/
-    registry.ts            the seam: defineBlock/createBlockRegistry, types
-    blockRegistry.ts       the wiring: every block definition + completeness check
-    BlockList.tsx          renders a dynamic zone by looking each block up
-    HeaderBlock.tsx        hero band            (ComponentCommonHeader)
-    TwoColumnBlock.tsx     image/text section   (ComponentCommonTwoColumnBlock)
-    CarouselBlock.tsx      scroll-snap carousel (ComponentCommonCarousel)
-    TwoColumnContent.tsx   the pairing shared by the section and the slides
-  ui/CmsImage.tsx          next/image wrapper: reserved box, skeleton, sizes
-  layout/                  EmptyState, PageFooter
-lib/
-  cms/blocks.ts            view models the UI renders (the inward contract)
-  cms/mapHomePage.ts       GraphQL payload -> view models; the trust boundary
-  cms/homePage.ts          source selection (strapi | fixture) + revalidate
-  cms/strapi.ts            server-only Apollo client for the CMS
-  cms/fixtures.ts          deterministic sample payload, in Strapi's own shape
-  safeHref.ts              URL sanitiser for CMS-supplied links
-  createEmotionCache.ts    one Emotion cache per render
-theme/index.ts             typography, palette, focus ring, section surfaces
-pages/
-  _document.tsx            server-side Emotion style extraction
-  _app.tsx                 theme + CssBaseline
-  index.tsx                the homepage; getStaticProps + ISR
-graphql/                   the HomePage document and generated types
-scripts/                   screenshot capture, seed artwork, PNG optimiser
-test-utils/                render-with-theme helper and block factories
-docs/screenshots/          the images used above
-```
+`createBlockRegistry` also throws on a duplicate registration, which is tested.
 
-## Design notes
-
-### The block registry is the seam
-
-A Strapi dynamic zone is an open set: an editor can add a component type at any
-time, and the front-end has to cope with types it has never seen. The obvious
-implementation is a `switch` on `__typename`, which every new block has to be
-threaded through in two or three places.
-
-Instead, each block ships a `defineBlock({ typename, component })` export next
-to its component, `blockRegistry.ts` collects them into a `Map`, and
-`BlockList` looks each block up. **Adding a block type is one new file plus one
-line in the list.** Two guards keep it honest:
-
-- a compile-time completeness check (`ALL_BLOCK_TYPES_REGISTERED`) that fails
-  `next build` if a member of the `HomeBlock` union has no component, and
-- a runtime skip-with-warning for a `__typename` the app does not know, because
-  the CMS can always be ahead of a deploy and one unknown block must not take
-  the page down.
-
-### Normalising once, at the trust boundary
+## Treating CMS content as untrusted
 
 Strapi's generated types are deeply optional and wrap media in an entity
 response, so rendering straight from them pushes the same defaulting,
-absolutising and sanitising into every component. `mapHomePage` does it once
-and hands the UI plain, non-optional view models. That is also where CMS input
-is treated as untrusted: every link goes through `lib/safeHref.ts`, which
-permits only `http:`, `https:`, `mailto:`, `tel:` and relative URLs, so an
-editor cannot store a `javascript:` URL that ends up in an `href`.
+absolutising and sanitising into every component. `lib/cms/mapHomePage.ts` does
+it once and hands the UI plain, non-optional view models. That single place is
+also the trust boundary:
 
-### Scalability: the bottleneck was the client bundle
+- Every CMS-supplied URL — button targets and image sources alike — goes through
+  [`lib/safeHref.ts`](lib/safeHref.ts), which permits only `http:`, `https:`,
+  `mailto:`, `tel:` and relative URLs and returns `null` otherwise, so the caller
+  drops the link rather than rendering an unsafe `href`. An editor cannot store
+  a `javascript:` URL that reaches an attribute.
+- Root-relative upload paths, which is what Strapi's local provider returns, are
+  absolutised against `STRAPI_CMS_URL`.
+- Blocks with no usable content, unknown `__typename`s and the `Error` member of
+  the union are dropped before the UI sees them.
 
-The page has one query and no user input, so there is no N+1 and nothing to
-paginate. The real cost was that the whole Apollo Client, the normalised cache
-and the GraphQL document were shipped to every visitor in order to re-run, on
-the client, a query whose answer was already in the HTML.
+## Environment
 
-The data layer now lives entirely in `getStaticProps`; `lib/cms/strapi.ts` is
-reached through a dynamic `import()` on the Strapi path only, so it is never in
-the browser's module graph.
+Every variable is read on the server only. `next.config.js` inlines nothing into
+the browser bundle, so the CMS address and token never reach a visitor.
 
-| | Before | After |
-| --- | --- | --- |
-| First Load JS for `/` | 161 kB | **115 kB** |
-| Shared chunks | 132 kB | **87.1 kB** |
-| `pages/_app` chunk | 60.9 kB | **16.2 kB** |
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `CMS_SOURCE` | no | `strapi` | `strapi` queries the live CMS. `fixture` renders the bundled payload in `lib/cms/fixtures.ts`, so the app builds and boots with no CMS running. Any other value is treated as `strapi`. |
+| `STRAPI_URL` | when `CMS_SOURCE=strapi` | `http://localhost:1337/graphql` | GraphQL endpoint of the CMS. Falls back to the default with a development warning when unset. |
+| `STRAPI_CMS_URL` | no | — | Origin of the Strapi instance. Its hostname is added to `images.domains` so `next/image` may load CMS media, and it is prefixed onto root-relative upload URLs. |
+| `STRAPI_TOKEN` | no | — | Strapi API token, sent as `Authorization: Bearer …`. Unset means the public endpoint. |
+| `CMS_REVALIDATE_SECONDS` | no | `60` | Seconds between ISR regenerations. A non-positive or unparseable value warns and falls back. |
+| `SCREENSHOT_PORT` | no | `8261` | Port `yarn screenshots` starts the production server on. |
 
-(`next build` output, same machine, production mode.)
+`.env.example` is the same list, annotated, with placeholders only.
 
-The other half is caching. `revalidate` is the whole strategy for a page like
-this: the HTML is generated once and regenerated at most once per window,
-whatever the traffic, and an editor's change appears without a redeploy. The
-window is `CMS_REVALIDATE_SECONDS`, so it is tunable per environment.
+## Working on it
 
-Media goes through `next/image` with intrinsic dimensions from the CMS, a
-`sizes` hint per breakpoint, lazy loading below the fold and a reserved box, so
-a 2 MB editor upload is not what a phone downloads and nothing reflows when it
-arrives.
+```bash
+yarn dev          # dev server on 8261          yarn lint        # ESLint + jsx-a11y + @typescript-eslint
+yarn build        # production build            yarn typecheck   # tsc --noEmit, strict
+yarn start        # serve that build            yarn test        # jest (add --watch, or a path fragment)
+yarn screenshots  # redo docs/screenshots       yarn seed:art    # redraw public/seed
+yarn gen          # regenerate GraphQL types from a live Strapi schema
+```
 
-### A CMS outage is not a build failure
+`yarn gen` introspects the schema over the network at the URL in
+`graphql.config.yml`, so Strapi must be running, and the file it writes carries
+a header noting the two places it has since been hand-edited and why.
 
-`getStaticProps` catches and logs; the page renders an empty state that explains
-what to do, and the next revalidation picks the content back up. The fixture
-path exists for the same reason from the other direction: the build, the tests,
-the Docker image and the screenshots all render the same payload through the
-same `mapHomePage` pipeline, so none of them can drift from the real code path.
+```
+components/blocks/   registry.ts (the seam) + blockRegistry.ts (the wiring) +
+                     BlockList and the three block components
+components/ui/       CmsImage: next/image with a reserved box and per-breakpoint sizes
+lib/cms/             blocks.ts (view models) · mapHomePage.ts (trust boundary) ·
+                     homePage.ts (source + revalidate) · strapi.ts (server-only client) ·
+                     fixtures.ts (deterministic sample payload, in Strapi's own shape)
+theme/index.ts       typography, palette, focus ring, alternating section surfaces
+pages/               _document.tsx (server-side Emotion extraction), _app.tsx, index.tsx
+scripts/             screenshot capture, seed artwork, PNG optimiser
+```
 
-### UI
+Tests sit in `__tests__` directories beside the code, except page tests: Next.js
+treats every file under `pages/` as a route, so those live in `__tests__/pages/`.
+`jest.setup.ts` installs a `fetch` stub that rejects loudly, so nothing can reach
+the network, and stubs `IntersectionObserver`, which jsdom lacks and `next/image`
+needs before it will swap in a real source.
 
-One theme owns typography, colour, spacing and the focus ring; blocks draw from
-it rather than styling themselves, which is the only way a page assembled by an
-editor stays coherent. Display type uses `clamp()` so it scales from 360px up
-without a stack of breakpoint overrides, section surfaces alternate by position
-in the dynamic zone, and `prefers-reduced-motion` is respected. The carousel is
-a native scroll-snap track — it works with touch, trackpad and keyboard before
-any JavaScript runs — with labelled controls and no auto-advance.
+```
+$ yarn test
+Test Suites: 13 passed, 13 total
+Tests:       126 passed, 126 total
+Time:        2.364 s
+```
 
-## Limitations
+## Known gaps
 
-- **One page.** The challenge is the `homePage` single type; there is no
+- **One route.** The brief is the `homePage` single type, so there is no
   routing, no article page and no search.
-- **No CSP.** MUI/Emotion inject styles at runtime, so a useful policy needs a
-  nonce plumbed through `_document`. The other standard security headers are
-  set in `next.config.js`.
-- **`yarn gen` needs a live Strapi.** The committed generated files have been
-  hand-edited twice, which the file header records; a schema change means
-  regenerating against a running CMS.
-- **The carousel has no auto-advance and no infinite loop.** Deliberate, but it
-  is a difference from most marketing carousels.
-- **The fixture is not the CMS.** It exercises the same mapping code, but it
-  cannot catch a schema drift in Strapi itself; only `yarn gen` against the
-  live schema does that.
-- **Docker image not built in this environment.** The `Dockerfile` and
-  `docker-compose.yml` are written to the same standard as the rest of the
-  repository and `docker compose config` parses, but the image has not been
-  built here.
+- **The Docker image has not been built here.** `docker compose config` parses
+  and the Dockerfile is maintained alongside the rest, but the image was never
+  built or booted in this environment. Treat that path as reviewed, not
+  smoke-tested.
+- **No CSP.** MUI and Emotion inject styles at runtime, so a useful policy needs
+  a nonce plumbed through `_document`. The other standard headers
+  (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+  `Permissions-Policy`) are set in `next.config.js`, and `poweredByHeader` is
+  off.
+- **`yarn gen` needs a live Strapi**, and the committed generated file has been
+  hand-edited twice. A schema change means regenerating against a running CMS.
+- **The fixture is not the CMS.** It runs through the same `mapHomePage`
+  pipeline, so it cannot drift from the real code path, but it cannot catch a
+  schema change in Strapi either. Only `yarn gen` against the live schema does
+  that.
+- **The carousel has no auto-advance and no infinite loop.** It is a native
+  scroll-snap track with labelled controls, which works with touch, trackpad and
+  keyboard before any JavaScript runs — deliberate, but a difference from most
+  marketing carousels. The CMS component carries no presentation settings at
+  all, so every one of those choices is made here.
